@@ -12,6 +12,9 @@
 #include <SPI.h>
 #include <SD.h>
 File myFile;
+//buzzer 
+
+
 // libreria para pantalla
 #include <stdint.h>
 #include <stdbool.h>
@@ -50,6 +53,8 @@ const int BTN2 = PF_4;  // sw1 para subir datos a la memoria
 // COMUNICACION UART
 # define Rx2 PD_6
 # define Tx2 PD_7
+// buzzer
+int buzzer = PC_4; 
 
 //-----------------------------------------------------------------------------
 //Prototipo de funciones
@@ -69,7 +74,7 @@ void LCD_Bitmap(unsigned int x, unsigned int y, unsigned int width, unsigned int
 void LCD_Sprite(int x, int y, int width, int height, unsigned char bitmap[], int columns, int index, char flip, char offset);
 
 
-extern uint8_t fondo[];
+extern uint8_t fondo[];// para establecer el fondo
 
 //-----------------------------------------------------------------------------
 //Variabls Globales
@@ -79,8 +84,8 @@ int cuenta = 0;
 int cuenta2 = 0;
 
 
-int pesoR;
-int mientras;
+String pesoR = "";
+
 //-----------------------------------------------------------------------------
 //ISR
 //-----------------------------------------------------------------------------
@@ -98,6 +103,7 @@ void setup()
   }
   pinMode(PA_3, OUTPUT);
   SPI.setModule(0);
+  pinMode(buzzer,OUTPUT);
 
   if (!SD.begin(PA_3)) {
     Serial.println("initialization failed!");
@@ -105,29 +111,27 @@ void setup()
   }
   Serial.println("initialization done.");
 
-
-
   //------------------------------------------------
-
-
   //botones de tiva
   pinMode(BTN, INPUT_PULLUP);
   pinMode(BTN2, INPUT_PULLUP);
-
-  //**********************************************************************************
+  //**************************************************************
+  //********************PARA PANTALLA*************************************
   SysCtlClockSet(SYSCTL_SYSDIV_2_5 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
   Serial.begin(115200);
   GPIOPadConfigSet(GPIO_PORTB_BASE, 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7, GPIO_STRENGTH_8MA, GPIO_PIN_TYPE_STD_WPU);
   Serial.println("Inicio");
-  LCD_Init();
-  LCD_Clear(0x00);
-  FillRect(0, 0, 319, 239, 0xFFFF);
-  FillRect(50, 60, 20, 20, 0xF800);
-  FillRect(70, 60, 20, 20, 0x07E0);
-  FillRect(90, 60, 20, 20, 0x001F);
+  LCD_Init(); // inicializa la LCD
+  LCD_Clear(0x00);// se borra . 0 es el color negro
+  //FillRect(0, 0, 319, 206, 0x421b);;// cordenada x, C y,ancho, lanolor del cuadrado
+  LCD_Bitmap(0, 0, 320, 240, fondo);//se llama a la imagen que se tiene en la libreria d efondo de 8 bits
+  String text1 = ":Kg";
 
-  //FillRect(0, 0, 319, 206, 0x421b);
-  String text1 = "Sensor de Peso";
+  LCD_Print(text1, 170, 150, 2, 0x00, 0xFE1D); // color azul y backgroung . 3 es el tama;o
+
+
+
+
   //*********************************************************************************
 }
 //-----------------------------------------------------------------------------
@@ -139,14 +143,19 @@ void loop()
   //********** control de boton1 para extraer datos   -----
   if (digitalRead(BTN) == LOW)
   {
-    if (cuenta >=0)
+    static unsigned long last_time_intrr1 = 0; //[ultimo tiempo]
+    unsigned long time_intrr1 = millis();      //tiempo en tiempo real
+
+    if (time_intrr1 - last_time_intrr1 > 200)
     {
       cuenta++;
+
+      if (cuenta >= 2)
+      {
+        cuenta = 0;
+      }
     }
-    if (cuenta >=2)
-    {
-      cuenta =0;
-    }
+    last_time_intrr1 = time_intrr1; //update del valor de la interrupcion
   }
 
 
@@ -155,50 +164,65 @@ void loop()
 
   if (digitalRead(BTN2) == LOW)
   {
-    if (cuenta2 >=0)
+    static unsigned long last_time_intrr2 = 0; //[ultimo tiempo]
+    unsigned long time_intrr2 = millis();      //tiempo en tiempo real
+
+    if (time_intrr2 - last_time_intrr2 > 200)
     {
       cuenta2++;
+
+      if (cuenta2 >= 2)
+      {
+        cuenta2 = 0;
+      }
     }
-    if (cuenta2 >=2)
-    {
-      cuenta2 =0;
-    }
+    last_time_intrr2 = time_intrr2; //update del valor de la interrupcion
   }
   // pedir dato de esp32 y enviar
-  if (cuenta ==1) {
-    pesoR = Serial2.read();
+  if (cuenta == 1) {
+    if (Serial2.available() > 0) {
+      pesoR = Serial2.readStringUntil('\n');
+    }
     Serial.println("Recibi:");
     Serial.println(pesoR);
+    tone(buzzer, 659.26 , 200);
+    LCD_Print(pesoR, 120, 100, 2, 0x00, 0xFE1D);//para imprimir en la pantalla
     delay(500);
     Serial2.write (1);
+
+    cuenta = 0;
   }
 
   //subir datos a SD
-  if (cuenta2 ==1) {
+  if (cuenta2 == 1) {
     writeSD();
+    tone(buzzer, 1200, 500); 
+    cuenta2 = 0;
+
   }
-  Serial.print("numero 1");
-  Serial.println(cuenta);
-  Serial.print("numero 2");
-  Serial.println(cuenta2);
+  // Serial.print("numero 1:  ");
+  //Serial.println(cuenta);
+  //Serial.print("numero 2:  ");
+  //Serial.println(cuenta2);
 
 
 }
 
 //***************************************************************************************************************************************
-// escribir en SD
+// FUNCION para  escribir en SD
 //***************************************************************************************************************************************
 void writeSD(void) {
 
   myFile = SD.open("PESO.csv", FILE_WRITE);//aabre el archivo  CSV de peso
 
-  mientras = pesoR;
+
   // if the file opened okay, write to it:
   if (myFile) {
     Serial.print("Subiendo Datos a SD");
     myFile.print("PESO: ");
     myFile.print(",");
-    myFile.print(mientras);
+    myFile.print(pesoR);
+    myFile.print(",");
     myFile.println(" en kg");
     // close the file:
     myFile.close(); // para cerrar el archivo sino el archivo queda corrupto
@@ -207,7 +231,15 @@ void writeSD(void) {
     // if the file didn't open, print an error:
     Serial.println("error opening Datos.csv");
   }
+  for (int x = 0; x < 320 - 32; x++) {
+    int anim2 = (x / 35) % 4;
+    LCD_Sprite(225, 150, 50, 50, pesaSprite, 5, anim2, 0, 1); //x,y, tama;o de image 1 y2, nombre de image, columnas, elijo una de las columnas;
+    delay(15);
+  }
 }
+//***************************************************************************************************************************************
+// FUNCION BUZZER
+//***************************************************************************************************************************************
 
 
 
